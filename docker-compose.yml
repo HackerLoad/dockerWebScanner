@@ -1,10 +1,8 @@
 services:
   scanner:
     build: .
-    # Host networking is required so nmap can see the physical LAN.
-    # On macOS with Docker Desktop this is limited by the VM layer;
-    # set SUBNET manually if auto-detection picks a wrong range.
-    network_mode: host
+    ports:
+      - "5001:5000"
 
     volumes:
       # Docker socket – needed to read container/port info
@@ -18,5 +16,5 @@ services:
     restart: unless-stopped
 
     environment:
-      # Override subnet if auto-detection is wrong, e.g. "192.168.1.0/24"
+      # On macOS set this to your LAN subnet, e.g. "192.168.1.0/24"
       - SUBNET=${SUBNET:-}

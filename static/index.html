@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Network Scanner</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:          #080c18;
+      --surface:     #0f1623;
+      --surface2:    #161e2e;
+      --border:      #1e2d45;
+      --text:        #e2e8f0;
+      --muted:       #64748b;
+      --local:       #10b981;
+      --gateway:     #f59e0b;
+      --docker-col:  #a78bfa;
+      --regular:     #60a5fa;
+      --unknown:     #6b7280;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, sans-serif;
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ── Header ── */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 20px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      z-index: 20;
+    }
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: -.02em;
+      color: var(--text);
+    }
+    .logo-icon {
+      width: 32px; height: 32px;
+      background: linear-gradient(135deg, #1e3a5f, #0f2744);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .header-right { display: flex; align-items: center; gap: 12px; }
+    .subnet-pill {
+      font-size: 11px; font-family: monospace;
+      padding: 4px 10px;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 20px; color: var(--muted);
+    }
+    .scan-btn {
+      display: flex; align-items: center; gap: 7px;
+      padding: 7px 16px;
+      background: var(--local); color: #000;
+      border: none; border-radius: 7px;
+      font-size: 13px; font-weight: 600; cursor: pointer;
+      transition: filter .15s;
+    }
+    .scan-btn:hover:not(:disabled) { filter: brightness(1.15); }
+    .scan-btn:disabled { opacity: .45; cursor: not-allowed; }
+    .scan-btn svg { flex-shrink: 0; }
+
+    /* ── Progress bar ── */
+    #progressBar {
+      height: 2px; background: var(--border);
+      flex-shrink: 0;
+    }
+    #progressFill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--local), #06b6d4);
+      width: 0%; transition: width .4s ease;
+    }
+
+    /* ── Layout ── */
+    .main { display: flex; flex: 1; overflow: hidden; }
+
+    /* ── Canvas ── */
+    #canvas { flex: 1; position: relative; overflow: hidden; }
+    #canvas svg { width: 100%; height: 100%; display: block; }
+
+    .empty-state {
+      position: absolute; inset: 0;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      pointer-events: none; color: var(--muted); text-align: center;
+      gap: 8px;
+    }
+    .empty-state h2 { font-size: 18px; color: var(--text); font-weight: 600; }
+    .empty-state p  { font-size: 13px; }
+
+    /* ── Legend ── */
+    .legend {
+      position: absolute; bottom: 16px; left: 16px;
+      background: rgba(15,22,35,.92); border: 1px solid var(--border);
+      border-radius: 8px; padding: 10px 14px;
+      font-size: 11px; backdrop-filter: blur(6px);
+      display: flex; flex-direction: column; gap: 5px;
+    }
+    .legend-title {
+      font-size: 10px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: .07em; color: var(--muted);
+      margin-bottom: 3px;
+    }
+    .legend-row { display: flex; align-items: center; gap: 7px; color: var(--text); }
+    .legend-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+
+    /* ── Sidebar ── */
+    .sidebar {
+      width: 0; overflow: hidden;
+      background: var(--surface);
+      border-left: 1px solid var(--border);
+      display: flex; flex-direction: column;
+      transition: width .3s ease;
+      flex-shrink: 0;
+    }
+    .sidebar.open { width: 320px; overflow-y: auto; }
+
+    .sb-header {
+      display: flex; align-items: flex-start;
+      justify-content: space-between;
+      padding: 16px 18px 14px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .sb-ip       { font-size: 17px; font-weight: 700; font-family: monospace; }
+    .sb-hostname { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .close-btn {
+      background: none; border: none; color: var(--muted);
+      cursor: pointer; font-size: 20px; line-height: 1;
+      padding: 2px 4px; border-radius: 4px; flex-shrink: 0;
+      transition: color .15s;
+    }
+    .close-btn:hover { color: var(--text); }
+
+    .sb-section { padding: 14px 18px; border-bottom: 1px solid var(--border); }
+    .sb-section-title {
+      font-size: 10px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: .07em;
+      color: var(--muted); margin-bottom: 9px;
+    }
+
+    .info-grid {
+      display: grid; grid-template-columns: auto 1fr;
+      gap: 5px 12px; font-size: 12px;
+    }
+    .ig-label { color: var(--muted); }
+    .ig-val    { font-family: monospace; word-break: break-all; }
+
+    .port-list { display: flex; flex-direction: column; gap: 5px; }
+    .port-row {
+      display: flex; align-items: center; gap: 8px;
+      padding: 7px 10px;
+      background: var(--surface2); border-radius: 6px; font-size: 12px;
+    }
+    .port-num { font-family: monospace; font-weight: 700; min-width: 48px; color: var(--regular); }
+    .port-num.is-docker { color: var(--docker-col); }
+    .port-svc  { color: var(--muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .docker-tag {
+      font-size: 10px; padding: 1px 6px;
+      background: rgba(167,139,250,.15);
+      color: var(--docker-col);
+      border: 1px solid rgba(167,139,250,.3);
+      border-radius: 4px; flex-shrink: 0;
+    }
+
+    .container-list { display: flex; flex-direction: column; gap: 8px; }
+    .container-card {
+      padding: 10px 12px;
+      background: var(--surface2);
+      border-left: 3px solid var(--docker-col);
+      border-radius: 6px;
+    }
+    .cc-name  { font-size: 13px; font-weight: 600; margin-bottom: 3px; }
+    .cc-image { font-size: 11px; color: var(--muted); margin-bottom: 7px; font-family: monospace; }
+    .cc-ports { display: flex; flex-wrap: wrap; gap: 4px; }
+    .cc-port-tag {
+      font-size: 11px; font-family: monospace;
+      padding: 2px 7px;
+      background: rgba(167,139,250,.12);
+      border: 1px solid rgba(167,139,250,.25);
+      border-radius: 4px; color: var(--docker-col);
+    }
+
+    /* ── Status bar ── */
+    .statusbar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 5px 18px;
+      background: var(--surface); border-top: 1px solid var(--border);
+      font-size: 11px; color: var(--muted); flex-shrink: 0;
+    }
+
+    /* ── SVG nodes / links ── */
+    .link { stroke: #1e3a5f; stroke-width: 1.5; stroke-dasharray: 5 4; opacity: .7; }
+    .node { cursor: pointer; }
+    .node-ring { fill: none; opacity: 0; transition: opacity .2s; }
+    .node:hover .node-ring { opacity: 1; }
+    .node.selected .node-ring { opacity: 1; }
+    .node-label {
+      fill: #fff; text-anchor: middle; pointer-events: none;
+      font-family: monospace; dominant-baseline: middle;
+    }
+    .node-host {
+      fill: rgba(255,255,255,.5); text-anchor: middle; pointer-events: none;
+      font-family: system-ui; dominant-baseline: middle;
+    }
+    .badge-circle { opacity: .95; }
+    .badge-text {
+      fill: #fff; text-anchor: middle; dominant-baseline: middle;
+      pointer-events: none; font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="2">
+        <circle cx="12" cy="12" r="3"/>
+        <circle cx="4"  cy="6"  r="2"/><circle cx="20" cy="6"  r="2"/>
+        <circle cx="4"  cy="18" r="2"/><circle cx="20" cy="18" r="2"/>
+        <line x1="6" y1="7"  x2="10" y2="11"/>
+        <line x1="18" y1="7"  x2="14" y2="11"/>
+        <line x1="6" y1="17" x2="10" y2="13"/>
+        <line x1="18" y1="17" x2="14" y2="13"/>
+      </svg>
+    </div>
+    Network Scanner
+  </div>
+  <div class="header-right">
+    <span class="subnet-pill" id="subnetPill">—</span>
+    <button class="scan-btn" id="scanBtn" onclick="startScan()">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+      </svg>
+      Scan Network
+    </button>
+  </div>
+</header>
+
+<div id="progressBar"><div id="progressFill"></div></div>
+
+<div class="main">
+  <div id="canvas">
+    <div class="empty-state" id="emptyState">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#334155" stroke-width="1.5">
+        <circle cx="12" cy="12" r="10"/>
+        <path d="M12 8v4l2 2"/>
+      </svg>
+      <h2>No scan data</h2>
+      <p>Click "Scan Network" to discover devices on your network</p>
+    </div>
+    <svg id="netSvg"></svg>
+    <div class="legend">
+      <div class="legend-title">Device Type</div>
+      <div class="legend-row"><div class="legend-dot" style="background:var(--local)"></div>   This machine</div>
+      <div class="legend-row"><div class="legend-dot" style="background:var(--gateway)"></div> Gateway / Router</div>
+      <div class="legend-row"><div class="legend-dot" style="background:var(--docker-col)"></div> Has Docker ports</div>
+      <div class="legend-row"><div class="legend-dot" style="background:var(--regular)"></div> Regular device</div>
+    </div>
+  </div>
+
+  <div class="sidebar" id="sidebar">
+    <div class="sb-header">
+      <div>
+        <div class="sb-ip" id="sbIp"></div>
+        <div class="sb-hostname" id="sbHostname"></div>
+      </div>
+      <button class="close-btn" onclick="closeSidebar()" title="Close">&#x2715;</button>
+    </div>
+    <div id="sbContent"></div>
+  </div>
+</div>
+
+<div class="statusbar">
+  <span id="statusText">Ready</span>
+  <span id="deviceCount"></span>
+</div>
+
+<script>
+// ─────────────────────────────────────────────
+// State
+// ─────────────────────────────────────────────
+let simulation = null;
+let currentData = null;
+let pollTimer  = null;
+let selectedIp = null;
+
+const COLOR = {
+  local:   "#10b981",
+  gateway: "#f59e0b",
+  docker:  "#a78bfa",
+  regular: "#60a5fa",
+  unknown: "#6b7280",
+};
+
+// ─────────────────────────────────────────────
+// SVG setup
+// ─────────────────────────────────────────────
+const svg  = d3.select("#netSvg");
+const defs = svg.append("defs");
+
+// Glow filter
+const filter = defs.append("filter").attr("id", "glow").attr("x", "-50%").attr("y", "-50%").attr("width", "200%").attr("height", "200%");
+filter.append("feGaussianBlur").attr("in", "SourceGraphic").attr("stdDeviation", "6").attr("result", "blur");
+const feMerge = filter.append("feMerge");
+feMerge.append("feMergeNode").attr("in", "blur");
+feMerge.append("feMergeNode").attr("in", "SourceGraphic");
+
+// Radial gradients
+function mkGrad(id, baseColor) {
+  const col = d3.color(baseColor);
+  const g = defs.append("radialGradient").attr("id", id).attr("cx", "38%").attr("cy", "32%");
+  g.append("stop").attr("offset", "0%").attr("stop-color", col.brighter(.8).formatHex());
+  g.append("stop").attr("offset", "100%").attr("stop-color", col.darker(.7).formatHex());
+}
+mkGrad("gLocal",   COLOR.local);
+mkGrad("gGateway", COLOR.gateway);
+mkGrad("gDocker",  COLOR.docker);
+mkGrad("gRegular", COLOR.regular);
+mkGrad("gUnknown", COLOR.unknown);
+
+function gradId(d) {
+  if (d.is_local)   return "url(#gLocal)";
+  if (d.is_gateway) return "url(#gGateway)";
+  if (d.ports.some(p => p.docker)) return "url(#gDocker)";
+  if (d.ports.length > 0)          return "url(#gRegular)";
+  return "url(#gUnknown)";
+}
+function strokeCol(d) {
+  if (d.is_local)   return COLOR.local;
+  if (d.is_gateway) return COLOR.gateway;
+  if (d.ports.some(p => p.docker)) return COLOR.docker;
+  if (d.ports.length > 0)          return COLOR.regular;
+  return COLOR.unknown;
+}
+
+const gMain  = svg.append("g").attr("class", "main-g");
+const gLinks = gMain.append("g");
+const gNodes = gMain.append("g");
+
+// Zoom + pan
+const zoom = d3.zoom().scaleExtent([.25, 5]).on("zoom", e => gMain.attr("transform", e.transform));
+svg.call(zoom);
+
+function nodeR(d) { return Math.max(38, 32 + Math.min(d.ports.length * 2.5, 28)); }
+
+// ─────────────────────────────────────────────
+// Graph rendering
+// ─────────────────────────────────────────────
+function renderGraph(data) {
+  const W = document.getElementById("canvas").clientWidth;
+  const H = document.getElementById("canvas").clientHeight;
+
+  const nodes = data.devices.map(d => ({
+    ...d,
+    id: d.ip,
+    // preserve position if already exists
+    x: (currentData?.devices.find(e => e.ip === d.ip) || {}).x,
+    y: (currentData?.devices.find(e => e.ip === d.ip) || {}).y,
+  }));
+
+  const gateway = nodes.find(n => n.is_gateway);
+  const links   = gateway
+    ? nodes.filter(n => n.id !== gateway.id).map(n => ({ source: n.id, target: gateway.id }))
+    : [];
+
+  currentData = { ...data, devices: nodes };
+
+  // ── Links ──
+  const link = gLinks.selectAll(".link")
+    .data(links, d => `${d.source}-${d.target}`)
+    .join(
+      enter => enter.append("line").attr("class", "link").attr("opacity", 0)
+        .call(e => e.transition().duration(400).attr("opacity", 1)),
+      update => update,
+      exit  => exit.transition().duration(300).attr("opacity", 0).remove()
+    );
+
+  // ── Nodes ──
+  const node = gNodes.selectAll(".node")
+    .data(nodes, d => d.id)
+    .join(
+      enter => {
+        const g = enter.append("g")
+          .attr("class", "node")
+          .attr("transform", d => `translate(${d.x ?? W/2},${d.y ?? H/2})`)
+          .call(d3.drag()
+            .on("start", dragStart)
+            .on("drag",  dragging)
+            .on("end",   dragEnd))
+          .on("click", (event, d) => { event.stopPropagation(); openSidebar(d); });
+
+        // Glow ring (hover / selected)
+        g.append("circle").attr("class", "node-ring");
+        // Main circle
+        g.append("circle").attr("class", "node-body").attr("opacity", 0)
+          .call(e => e.transition().duration(400).attr("opacity", 1));
+        // Port-count badge
+        g.append("circle").attr("class", "badge-circle");
+        g.append("text").attr("class", "badge-text");
+        // IP label
+        g.append("text").attr("class", "node-label");
+        // Hostname
+        g.append("text").attr("class", "node-host");
+        return g;
+      },
+      update => update,
+      exit  => exit.transition().duration(300).attr("opacity", 0).remove()
+    );
+
+  // Update visual properties
+  node.each(function(d) {
+    const g   = d3.select(this);
+    const r   = nodeR(d);
+    const col = strokeCol(d);
+
+    g.classed("selected", d.ip === selectedIp);
+
+    g.select(".node-ring")
+      .attr("r", r + 7)
+      .attr("stroke", col)
+      .attr("stroke-width", 2)
+      .attr("filter", "url(#glow)");
+
+    g.select(".node-body")
+      .attr("r", r)
+      .attr("fill", gradId(d))
+      .attr("stroke", col)
+      .attr("stroke-width", 1.5);
+
+    // Badge
+    const bR = 10;
+    g.select(".badge-circle")
+      .attr("cx", r * .65)
+      .attr("cy", -r * .65)
+      .attr("r", bR)
+      .attr("fill", col);
+
+    g.select(".badge-text")
+      .attr("x", r * .65)
+      .attr("y", -r * .65)
+      .attr("font-size", 9)
+      .text(d.ports.length);
+
+    // IP
+    const hasHost = d.hostname && d.hostname !== d.ip;
+    g.select(".node-label")
+      .attr("y", hasHost ? -6 : 0)
+      .attr("font-size", r > 50 ? 11 : 10)
+      .text(d.ip);
+
+    // Hostname
+    g.select(".node-host")
+      .attr("y", 8)
+      .attr("font-size", 9)
+      .text(hasHost ? d.hostname : "");
+  });
+
+  // ── Simulation ──
+  if (simulation) simulation.stop();
+
+  simulation = d3.forceSimulation(nodes)
+    .force("center",  d3.forceCenter(W / 2, H / 2))
+    .force("charge",  d3.forceManyBody().strength(-600))
+    .force("collide", d3.forceCollide(d => nodeR(d) + 18))
+    .force("link",    d3.forceLink(links).id(d => d.id).distance(140).strength(.6))
+    .on("tick", () => {
+      link
+        .attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+        .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+      node.attr("transform", d => `translate(${d.x},${d.y})`);
+    });
+
+  // dismiss sidebar click on empty canvas
+  svg.on("click", () => closeSidebar());
+}
+
+// ─────────────────────────────────────────────
+// Drag
+// ─────────────────────────────────────────────
+function dragStart(event, d) {
+  if (!event.active) simulation.alphaTarget(.3).restart();
+  d.fx = d.x; d.fy = d.y;
+}
+function dragging(event, d) { d.fx = event.x; d.fy = event.y; }
+function dragEnd(event, d)  {
+  if (!event.active) simulation.alphaTarget(0);
+  d.fx = null; d.fy = null;
+}
+
+// ─────────────────────────────────────────────
+// Sidebar
+// ─────────────────────────────────────────────
+function openSidebar(d) {
+  selectedIp = d.ip;
+  // update ring
+  d3.selectAll(".node").classed("selected", n => n.ip === d.ip);
+
+  document.getElementById("sbIp").textContent       = d.ip;
+  document.getElementById("sbHostname").textContent = d.hostname || "No hostname resolved";
+  document.getElementById("sidebar").classList.add("open");
+
+  const content = document.getElementById("sbContent");
+  let html = "";
+
+  // Info section
+  html += `<div class="sb-section">
+    <div class="sb-section-title">Device Info</div>
+    <div class="info-grid">
+      <span class="ig-label">IP</span>       <span class="ig-val">${d.ip}</span>
+      <span class="ig-label">Hostname</span> <span class="ig-val">${d.hostname || "—"}</span>
+      <span class="ig-label">MAC</span>      <span class="ig-val">${d.mac || "—"}</span>
+      <span class="ig-label">Vendor</span>   <span class="ig-val">${d.vendor || "—"}</span>
+      <span class="ig-label">Role</span>     <span class="ig-val">${d.is_local ? "This machine" : d.is_gateway ? "Gateway" : "Host"}</span>
+    </div>
+  </div>`;
+
+  // Ports section
+  if (d.ports.length === 0) {
+    html += `<div class="sb-section"><div class="sb-section-title">Open Ports</div><span style="font-size:12px;color:var(--muted)">No open ports found</span></div>`;
+  } else {
+    html += `<div class="sb-section">
+      <div class="sb-section-title">Open Ports (${d.ports.length})</div>
+      <div class="port-list">`;
+    for (const p of d.ports) {
+      const isDoc = !!p.docker;
+      const svc   = p.docker ? `docker → ${p.docker.container}` : (p.service || "—");
+      html += `<div class="port-row">
+        <span class="port-num ${isDoc ? "is-docker" : ""}">${p.port}/${p.protocol}</span>
+        <span class="port-svc" title="${svc}">${svc}</span>
+        ${isDoc ? `<span class="docker-tag">Docker</span>` : ""}
+      </div>`;
+    }
+    html += `</div></div>`;
+  }
+
+  // Docker containers section (local machine only)
+  if (d.is_local && currentData?.docker_containers?.length) {
+    html += `<div class="sb-section">
+      <div class="sb-section-title">Docker Containers (${currentData.docker_containers.length})</div>
+      <div class="container-list">`;
+    for (const c of currentData.docker_containers) {
+      const portTags = Object.entries(c.ports)
+        .map(([hp, info]) => `<span class="cc-port-tag">${hp} → ${info.container_port}</span>`)
+        .join("");
+      html += `<div class="container-card">
+        <div class="cc-name">${c.name}</div>
+        <div class="cc-image">${c.image}</div>
+        <div class="cc-ports">${portTags || "<span style='font-size:11px;color:var(--muted)'>No exposed ports</span>"}</div>
+      </div>`;
+    }
+    html += `</div></div>`;
+  }
+
+  content.innerHTML = html;
+}
+
+function closeSidebar() {
+  selectedIp = null;
+  d3.selectAll(".node").classed("selected", false);
+  document.getElementById("sidebar").classList.remove("open");
+}
+
+// ─────────────────────────────────────────────
+// API polling
+// ─────────────────────────────────────────────
+async function pollStatus() {
+  try {
+    const res  = await fetch("/api/status");
+    const data = await res.json();
+
+    document.getElementById("progressFill").style.width = data.progress + "%";
+    document.getElementById("statusText").textContent   = data.message;
+    document.getElementById("scanBtn").disabled         = data.running;
+
+    if (data.has_results) {
+      const r = await fetch("/api/results");
+      const results = await r.json();
+      document.getElementById("emptyState").style.display = "none";
+      document.getElementById("subnetPill").textContent   = results.subnet;
+      document.getElementById("deviceCount").textContent  = `${results.devices.length} device(s)`;
+      renderGraph(results);
+
+      // re-populate sidebar if open
+      if (selectedIp) {
+        const dev = results.devices.find(d => d.ip === selectedIp);
+        if (dev) openSidebar(dev);
+      }
+    }
+
+    if (!data.running) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+      if (data.progress === 100) {
+        setTimeout(() => { document.getElementById("progressFill").style.width = "0%"; }, 1500);
+      }
+    }
+  } catch (_) { /* network error during scan – ignore */ }
+}
+
+async function startScan() {
+  document.getElementById("scanBtn").disabled = true;
+  document.getElementById("statusText").textContent = "Starting scan…";
+
+  try {
+    await fetch("/api/scan", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+  } catch (e) {
+    document.getElementById("statusText").textContent = "Failed to start scan";
+    document.getElementById("scanBtn").disabled = false;
+    return;
+  }
+
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(pollStatus, 1500);
+  pollStatus();
+}
+
+// Initial status check on load
+(async () => {
+  try {
+    const r = await fetch("/api/status");
+    const d = await r.json();
+    if (d.has_results) {
+      pollStatus();
+    }
+    if (d.running) {
+      document.getElementById("scanBtn").disabled = true;
+      pollTimer = setInterval(pollStatus, 1500);
+    }
+  } catch (_) {}
+})();
+
+// Resize
+window.addEventListener("resize", () => {
+  if (currentData && simulation) {
+    const W = document.getElementById("canvas").clientWidth;
+    const H = document.getElementById("canvas").clientHeight;
+    simulation.force("center", d3.forceCenter(W / 2, H / 2)).alpha(.3).restart();
+  }
+});
+</script>
+</body>
+</html>

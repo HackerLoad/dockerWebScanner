@@ -1,0 +1,4 @@
+flask==3.0.3
+flask-cors==4.0.1
+python-nmap==0.7.1
+docker==7.1.0
